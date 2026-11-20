@@ -283,6 +283,7 @@ class MPMS_Dataset:
             for idx in range(len(self.sus_T)):
                 file.write(f"{self.sus_T[idx]}\t{self.XT[idx]}\t{self.Xpara[idx]}\n")
         
+        #Magnetization
         with open(os.path.join(self.dir, common_name+'_sus.txt'),'w') as file:
             title_str=''
             title_str+='Field (T)\t'
@@ -431,5 +432,12 @@ if len(sys.argv)>1:
 ###############################################################################
 
 
+####Test Code - remove after work has completed########
 
+
+Gd_test=MPMS_Dataset('20261029_Gd_monomer_1.csv',
+                     mass=21.9,MW=883.96,Xdia=-335.58)
+
+
+#######################################################
 
