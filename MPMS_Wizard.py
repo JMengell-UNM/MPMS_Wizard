@@ -73,12 +73,9 @@ class MPMS_Dataset:
         self.mass=mass
         self.MW=MW
         self.Xdia=Xdia
-        self.Xpara=None
-        self.XT=None
-        self.sus_T=None #Sliced T range for susceptibility experiment
-        self.inverse_Xpara=None
-        self.ueff=None
+        
         self.mag_dict={}
+        self.sus_dict={}
         
         
         ####################################################
@@ -199,7 +196,7 @@ class MPMS_Dataset:
                 stop_idxs.append(idx)
             
             elif delta_T<0 and len(start_idxs)!=len(stop_idxs):
-                #Magnetization reset
+                #Starting susceptibility Experiment
                 stop_idxs.append(idx)
             
             
@@ -209,63 +206,75 @@ class MPMS_Dataset:
                 #check for new dataset
                 if len(start_idxs)==len(stop_idxs):
                     print(f'Susceptibility Experiment ({self.H[idx]} Oe) detected.')
-                    data_types.append('sus')
+                    data_types.append(['sus', round(self.H[idx],ndigits=1)])
                     start_idxs.append(idx)
+            
         #Adding last stop idx
         if len(start_idxs)!=len(stop_idxs):
             stop_idxs.append(len(self.H)-1)
         
         #Reindexing for slicing:
         stop_idxs=[n+1 for n in stop_idxs]
-        
+
         #Time for packaging; we make the bold assumption there is only 1 
-        #susceptibility experiment.
+        #susceptibility experiment. Fucking hell that's why I have to fix this
+        #shit now.
         if self.mass!=None and self.MW!=None:
-            for idx in range(len(data_types)):
-                data_class=data_types[idx]
-                if type(data_class)==list:
+            for idx, data_class in enumerate(data_types):
+                
+                if data_class[0]=='mag':
                     #Magnetization
                     exp, T = data_class
                     H = self.H[start_idxs[idx]:stop_idxs[idx]]
                     M = self.M_emu[start_idxs[idx]:stop_idxs[idx]]
                     NB = [m*self.MW/((self.mass/1000)*5585) for m in M]
                     self.mag_dict[T]=[H,NB]
-                elif data_class=='sus':
+                elif data_class[0]=='sus':
+                    #Susceptibility
+                    exp, H_label = data_class
                     H = self.H[start_idxs[idx]:stop_idxs[idx]]
                     M = self.M_emu[start_idxs[idx]:stop_idxs[idx]]
                     T = self.T[start_idxs[idx]:stop_idxs[idx]]
                     #Converting to ndarray for easy calculation revert later
                     X = [m*self.MW/(self.mass/1000) for m in M]/np.multiply(1,H)
                     X = X - self.Xdia*0.000001
-                    self.sus_T=T
-                    self.Xpara=X.tolist()
-                    self.XT=(X*T).tolist()
-                    self.inverse_Xpara=(1/X).tolist()
-                    self.ueff=(2.828*np.sqrt(X*T)).tolist()
+                    temp_dict={}
+                    temp_dict['T']=T
+                    temp_dict['Xpara']=X.tolist()
+                    temp_dict['XT']=(X*T).tolist()
+                    temp_dict['inverse_Xpara']=(1/X).tolist()
+                    temp_dict['ueff']=(2.828*np.sqrt(X*T)).tolist()
+                    self.sus_dict[H_label]=temp_dict
+                    
                 else:
                     print("I have now clue how you've gotten here")
         else:
             print("Neither mass or molecular weight have been supplied, units of data remain in emu - no quantitative analysis is possible")
-            for idx in range(len(data_types)):
-                data_class=data_types[idx]
-                if type(data_class)==list:
+            for idx, data_class in enumerate(data_types):
+                
+                if data_class[0]=='mag':
                     #Magnetization
                     exp, T = data_class
                     H = self.H[start_idxs[idx]:stop_idxs[idx]]
                     M = self.M_emu[start_idxs[idx]:stop_idxs[idx]]
                     NB = M
                     self.mag_dict[T]=[H,NB]
-                elif data_class=='sus':
+                elif data_class[0]=='sus':
+                    #Susceptibility
+                    exp, H_label = data_class
                     H = self.H[start_idxs[idx]:stop_idxs[idx]]
                     M = self.M_emu[start_idxs[idx]:stop_idxs[idx]]
                     T = self.T[start_idxs[idx]:stop_idxs[idx]]
                     #Converting to ndarray for easy calculation revert later
                     X=np.multiply(M,1)/H
-                    self.sus_T=T
-                    self.Xpara=X.tolist()
-                    self.XT=(X*T).tolist()
-                    self.inverse_Xpara=(1/X).tolist()
-                    self.ueff=(2.828*np.sqrt(X*T)).tolist()
+                    temp_dict={}
+                    temp_dict['T']=T
+                    temp_dict['Xpara']=X.tolist()
+                    temp_dict['XT']=(X*T).tolist()
+                    temp_dict['inverse_Xpara']=(1/X).tolist()
+                    temp_dict['ueff']=(2.828*np.sqrt(X*T)).tolist()
+                    self.sus_dict[H_label]=temp_dict
+                    
                 else:
                     print("I have now clue how you've gotten here")
         print('Data Comprehension Complete.')
@@ -279,12 +288,23 @@ class MPMS_Dataset:
         common_name= self.filename.split('.')[0]
         #Susceptibility
         with open(os.path.join(self.dir, common_name+'_sus.txt'),'w') as file:
-            file.write('Temperature (K)\tXT(emu·mol-1·K)\tX(emu·mol-1·K)\n')
-            for idx in range(len(self.sus_T)):
-                file.write(f"{self.sus_T[idx]}\t{self.XT[idx]}\t{self.Xpara[idx]}\n")
+            header='Temperature (K)'
+            for field in self.sus_dict.keys():
+                header+=f'\t{field} Oe XT(emu·mol-1·K)\t{field} Oe X(emu·mol-1·K)'
+            header+='\n'
+            file.write(header)
+            
+            num_points=[len(self.sus_dict[n]['T']) for n in self.sus_dict.keys()]
+            for idx in range(max(num_points)):
+                line=f"{self.sus_dict[list(self.sus_dict.keys())[0]]['T'][idx]}"
+                for field in self.sus_dict.keys():
+                    #Updating to use dict
+                    line+=f"\t{self.sus_dict[field]['XT'][idx]}\t{self.sus_dict[field]['Xpara'][idx]}"
+                line+='\n'
+                file.write(line)
         
         #Magnetization
-        with open(os.path.join(self.dir, common_name+'_sus.txt'),'w') as file:
+        with open(os.path.join(self.dir, common_name+'_mag.txt'),'w') as file:
             title_str=''
             title_str+='Field (T)\t'
             for temp in self.mag_dict.keys():
@@ -310,10 +330,18 @@ class MPMS_Dataset:
         phi_dir=os.path.join(self.dir, f'Phi_dir_{common_name}')
         if not os.path.isdir(phi_dir):
             os.makedirs(phi_dir)
+        
         #Susceptibility
         with open(os.path.join(phi_dir, common_name+'_sus.exp'),'w') as file:
-            for idx in range(len(self.sus_T)):
-                file.write(f"{self.sus_T[idx]}\t{self.XT[idx]}\n")
+            num_points=[len(self.sus_dict[n]['T']) for n in self.sus_dict.keys()]
+            for idx in range(max(num_points)):
+                line=f"{self.sus_dict[list(self.sus_dict.keys())[0]]['T'][idx]}"
+                for field in self.sus_dict.keys():
+                    #Updating to use dict
+                    line+=f"\t{self.sus_dict[field]['XT'][idx]}"
+                line+='\n'
+                file.write(line)
+                
         #Magnetization
         with open(os.path.join(phi_dir, common_name+'_mag.exp'),'w') as file:
             for idx in range(len(self.mag_dict[list(self.mag_dict.keys())[0]][0])):
@@ -325,6 +353,7 @@ class MPMS_Dataset:
                 temp_str+='\n'
                 file.write(temp_str)
         
+        #Writing blank input
         with open(os.path.join(phi_dir, common_name+'.input'),'w') as file:
             pass
                 
@@ -350,7 +379,14 @@ class MPMS_Dataset:
         fig,ax = plt.subplots()
         
         if data.upper()=='XT'.upper():
-            ax.scatter(self.sus_T,self.XT)
+            if len(self.sus_dict.keys())>1:
+                print("More than one Magnetic Susceptibility Experiment detected. Select the one you wish to plot by entering its index.")
+                print(*enumerate(self.sus_dict.keys()),sep='\n')
+                idx=int(input())
+            else:
+                idx=0
+            ax.scatter(self.sus_dict[list(self.sus_dict.keys())[idx]]['T'],
+                       self.sus_dict[list(self.sus_dict.keys())[idx]]['XT'])
             ax.set_ylabel('XT (emu·mol$^{-1}$·K)')
             ax.set_xlabel('Temperature (K)')
             ax.set_title(f"{self.filename.split('.')[0]} Susceptibility")
@@ -376,19 +412,41 @@ class MPMS_Dataset:
             #ax.legend()
         
         if data.upper()=='X'.upper():
-            ax.scatter(self.sus_T,self.Xpara)
+            if len(self.sus_dict.keys())>1:
+                print("More than one Magnetic Susceptibility Experiment detected. Select the one you wish to plot by entering its index.")
+                print(*enumerate(self.sus_dict.keys()),sep='\n')
+                idx=int(input())
+            else:
+                idx=0
+            ax.scatter(self.sus_dict[list(self.sus_dict.keys())[idx]]['T'],
+                       self.sus_dict[list(self.sus_dict.keys())[idx]]['Xpara'])
             ax.set_ylabel('X (emu·mol$^{-1}$)')
             ax.set_xlabel('Temperature (K)')
             ax.set_title(f"{self.filename.split('.')[0]} Susceptibility")
         
         if data.upper()=='1/X'.upper():
-            ax.scatter(self.sus_T,self.inverse_Xpara)
+            if len(self.sus_dict.keys())>1:
+                print("More than one Magnetic Susceptibility Experiment detected. Select the one you wish to plot by entering its index.")
+                print(*enumerate(self.sus_dict.keys()),sep='\n')
+                idx=int(input())
+            else:
+                idx=0
+            ax.scatter(self.sus_dict[list(self.sus_dict.keys())[idx]]['T'],
+                       self.sus_dict[list(self.sus_dict.keys())[idx]]['inverse_Xpara'])
+            
             ax.set_ylabel('1/X (emu$^{-1}$·mol)')
             ax.set_xlabel('Temperature (K)')
             ax.set_title(f"{self.filename.split('.')[0]} Susceptibility")
         
         if data.upper()=='ueff'.upper():
-            ax.scatter(self.sus_T,self.ueff)
+            if len(self.sus_dict.keys())>1:
+                print("More than one Magnetic Susceptibility Experiment detected. Select the one you wish to plot by entering its index.")
+                print(*enumerate(self.sus_dict.keys()),sep='\n')
+                idx=int(input())
+            else:
+                idx=0
+            ax.scatter(self.sus_dict[list(self.sus_dict.keys())[idx]]['T'],
+                       self.sus_dict[list(self.sus_dict.keys())[idx]]['ueff'])
             ax.set_ylabel('μ$_{eff}$')
             ax.set_xlabel('Temperature (K)')
             ax.set_title(f"{self.filename.split('.')[0]} Susceptibility")
@@ -431,13 +489,4 @@ if len(sys.argv)>1:
                 break       
 ###############################################################################
 
-
-####Test Code - remove after work has completed########
-
-
-Gd_test=MPMS_Dataset('20261029_Gd_monomer_1.csv',
-                     mass=21.9,MW=883.96,Xdia=-335.58)
-
-
-#######################################################
 
